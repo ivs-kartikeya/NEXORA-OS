@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${NEXORA_ISO_OUT:-$ROOT/dist}"
 WORK="${NEXORA_ISO_WORK:-$ROOT/.iso-work}"
-ISO_NAME="NexoraOS-1.0.1-beta.5-amd64.iso"
+ISO_NAME="NexoraOS-1.0.1-beta.1-amd64.iso"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}/nexora"
 VOICE="$DATA/voice"
 FAST_MODEL="$DATA/models/Qwen3-0.6B-Q4_0.gguf"
@@ -47,19 +47,7 @@ need lb
 "$ROOT/scripts/build.sh"
 
 mkdir -p "$OUT_DIR"
-
-# live-build creates root-owned files. Clean the previous workspace as root,
-# but refuse dangerous paths before doing so.
-if [[ -e "$WORK" ]]; then
-  case "$WORK" in
-    /|"$HOME"|"$ROOT")
-      echo "Refusing to remove unsafe ISO work path: $WORK" >&2
-      exit 2
-      ;;
-  esac
-  echo "Cleaning previous ISO workspace..."
-  sudo rm -rf -- "$WORK"
-fi
+rm -rf "$WORK"
 mkdir -p "$WORK"
 
 # Public images must not contain binaries tuned specifically to the developer's
@@ -82,33 +70,22 @@ lb config noauto \
   --architectures amd64 \
   --binary-images iso-hybrid \
   --debian-installer none \
-  --apt-recommends false \
-  --cache false \
-  --chroot-squashfs-compression-type xz \
   --archive-areas "main contrib non-free-firmware" \
-  --bootappend-live "boot=live components live-config.nox11autologin live-config.username=nexora live-config.hostname=nexora locales=en_US.UTF-8 keyboard-layouts=us quiet splash" \
-  --bootappend-live-failsafe "boot=live components live-config.nox11autologin live-config.username=nexora live-config.hostname=nexora locales=en_US.UTF-8 keyboard-layouts=us nomodeset" \
+  --bootappend-live "boot=live components username=nexora hostname=nexora locales=en_US.UTF-8 keyboard-layouts=us quiet splash" \
   --iso-application "Nexora OS V1 Public Beta" \
   --iso-publisher "Nexora OS" \
-  --iso-volume "NEXORA_101B5"
+  --iso-volume "NEXORA_V1"
 
 mkdir -p config/package-lists
 cat > config/package-lists/nexora.list.chroot <<'PKGS'
 live-boot
 live-config
-live-config-systemd
-user-setup
-locales
-keyboard-configuration
 systemd-sysv
 sudo
 dbus-user-session
 dbus-x11
 kwin-wayland
 xwayland
-qt6-wayland
-xterm
-xauth
 sddm
 qml6-module-qtquick
 qml6-module-qtquick-controls
@@ -166,9 +143,7 @@ mkdir -p \
   "$INC/usr/local/bin" \
   "$INC/usr/share/wayland-sessions" \
   "$INC/usr/share/sddm/themes/nexora" \
-  "$INC/etc/sddm.conf.d" \
-  "$INC/etc/systemd/system/sddm.service.d" \
-  "$INC/etc/live/config.conf.d"
+  "$INC/etc/sddm.conf.d"
 
 install -m0755 "$ROOT/build-out/nexora-shell" "$SKEL/.local/bin/nexora-shell"
 install -m0755 "$ROOT/build-out/nexora-core" "$SKEL/.local/bin/nexora-core"
@@ -210,7 +185,7 @@ TONY
 
 cat > "$SKEL/.local/share/nexora/release" <<'REL'
 NAME=Nexora OS
-VERSION=1.0.1-beta.5
+VERSION=1.0.1-beta.1
 CHANNEL=public-beta
 BASE=Debian-Linux
 DESKTOP=Nexora
@@ -218,31 +193,15 @@ CORE_API=org.nexora.Core
 AI=Tony
 REL
 
-cat > "$INC/etc/sddm.conf.d/99-nexora-live.conf" <<'SDDM'
+cat > "$INC/etc/sddm.conf.d/90-nexora-live.conf" <<'SDDM'
 [Autologin]
 User=nexora
 Session=nexora.desktop
 Relogin=false
 
-[Users]
-RememberLastSession=false
-RememberLastUser=false
-
 [Theme]
 Current=nexora
 SDDM
-
-cat > "$INC/etc/systemd/system/sddm.service.d/10-nexora-live-ordering.conf" <<'SDDMORDER'
-[Unit]
-Wants=live-config.service
-After=live-config.service
-SDDMORDER
-
-cat > "$INC/etc/live/config.conf.d/nexora.conf" <<'LIVECONFIG'
-LIVE_USERNAME="nexora"
-LIVE_HOSTNAME="nexora"
-LIVE_CONFIG_NOX11AUTOLOGIN="true"
-LIVECONFIG
 
 mkdir -p config/hooks/live
 cat > config/hooks/live/050-nexora.hook.chroot <<'HOOK'
@@ -252,111 +211,9 @@ chmod 0755 /usr/local/bin/start-nexora
 # Ensure NetworkManager owns networking in the live environment.
 systemctl enable NetworkManager.service >/dev/null 2>&1 || true
 systemctl enable sddm.service >/dev/null 2>&1 || true
-
-# This image is a Nexora live system, not a Plasma live image. live-config can
-# otherwise choose a desktop session of its own during first boot. Keep the
-# Plasma binaries/libraries that KWin may depend on, but remove Plasma login
-# entries so SDDM has exactly one graphical user session to choose: Nexora.
-rm -f /usr/share/wayland-sessions/plasma*.desktop /usr/share/xsessions/plasma*.desktop 2>/dev/null || true
-
-# Fail the ISO build rather than shipping another image whose custom session is
-# absent from the root filesystem.
-dpkg-query -W -f='${Status}\n' user-setup 2>/dev/null | grep -q 'install ok installed'
-test -x /usr/local/bin/start-nexora
-test -f /usr/share/wayland-sessions/nexora.desktop
-
-
-# Nexora release gate: fail closed on runtime dependency regressions.
-for pkg in user-setup live-config-systemd qt6-wayland xterm xauth; do
-  dpkg-query -W -f='${Status}\n' "$pkg" 2>/dev/null | grep -q 'install ok installed' || {
-    echo "Nexora release gate: required package missing: $pkg" >&2
-    exit 1
-  }
-done
-
-for bin in /etc/skel/.local/bin/nexora-shell /etc/skel/.local/bin/nexora-core /usr/bin/kwin_wayland; do
-  test -x "$bin" || { echo "Nexora release gate: executable missing: $bin" >&2; exit 1; }
-  missing="$(ldd "$bin" 2>/dev/null | grep -F 'not found' || true)"
-  if [ -n "$missing" ]; then
-    echo "Nexora release gate: unresolved libraries in $bin" >&2
-    echo "$missing" >&2
-    exit 1
-  fi
-done
-
-find /usr/lib /lib -type f -path '*/qt6/plugins/platforms/libqwayland*.so' -print -quit 2>/dev/null | grep -q . || {
-  echo 'Nexora release gate: Qt 6 Wayland platform plugin not found' >&2
-  exit 1
-}
-
-for module in QtQuick QtQuick/Controls QtQuick/Layouts QtQuick/Window QtQuick/Dialogs; do
-  find /usr/lib -type f -path "*/qt6/qml/$module/qmldir" -print -quit 2>/dev/null | grep -q . || {
-    echo "Nexora release gate: QML module missing: $module" >&2
-    exit 1
-  }
-done
-
-test -x /etc/skel/.local/libexec/nexora-shell-supervisor || {
-  echo 'Nexora release gate: shell supervisor missing' >&2
-  exit 1
-}
-
 # Do not preload Tony's LLM; the local model is demand-loaded.
 HOOK
 chmod +x config/hooks/live/050-nexora.hook.chroot
-
-# Conservative image slimming. Keep runtime libraries, firmware, Flatpak, Firefox,
-# Tony and Voice intact; remove caches and documentation that are not needed to
-# boot or evaluate the public beta. Package copyright files are intentionally kept.
-cat > config/hooks/live/080-nexora-slim.hook.chroot <<'SLIMHOOK'
-#!/bin/sh
-set -e
-
-rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* /tmp/* /var/tmp/* 2>/dev/null || true
-rm -rf /usr/share/man/* /usr/share/info/* 2>/dev/null || true
-rm -rf /usr/share/help/* 2>/dev/null || true
-find /usr/share/doc -type f \( -name 'changelog*' -o -name 'NEWS*' \) -delete 2>/dev/null || true
-find /var/log -type f -exec sh -c ': > "$1"' _ {} \; 2>/dev/null || true
-find /usr -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
-
-# English is the beta's only shipped UI locale. Keep C/POSIX and English
-# translations, remove other locale payloads. This is deliberately done after
-# packages are installed so dependencies remain valid.
-if [ -d /usr/share/locale ]; then
-  find /usr/share/locale -mindepth 1 -maxdepth 1 -type d \
-    ! -name 'en' ! -name 'en_*' ! -name 'en-*' \
-    -exec rm -rf {} + 2>/dev/null || true
-fi
-SLIMHOOK
-chmod +x config/hooks/live/080-nexora-slim.hook.chroot
-
-# Rebrand both UEFI/GRUB and BIOS/ISOLINUX menus at the binary stage. Debian's
-# live-build generates the kernel paths for us first; this hook only changes
-# public labels/metadata, which keeps the boot mechanics untouched.
-cat > config/hooks/live/990-nexora-branding.hook.binary <<'BRANDHOOK'
-#!/bin/sh
-set -e
-
-for dir in binary/boot/grub binary/isolinux; do
-  [ -d "$dir" ] || continue
-  find "$dir" -type f \( -name '*.cfg' -o -name '*.txt' \) -print 2>/dev/null | \
-    while IFS= read -r f; do
-      sed -E -i \
-        -e 's/Debian GNU\/Linux [0-9]+ \([^)]*\)/Nexora OS 1.0.1 Public Beta/g' \
-        -e 's/Debian GNU\/Linux/Nexora OS/g' \
-        -e 's/Live system \(amd64 fail-safe mode\)/Start Nexora OS (safe graphics)/g' \
-        -e 's/Live system \(amd64\)/Start Nexora OS/g' \
-        -e 's/Live system \(fail-safe mode\)/Start Nexora OS (safe graphics)/g' \
-        -e 's/Live system/Start Nexora OS/g' \
-        "$f"
-    done
- done
-
-mkdir -p binary/.disk
-printf '%s\n' 'Nexora OS 1.0.1 Public Beta beta.5' > binary/.disk/info
-printf '%s\n' 'Nexora OS' > binary/.disk/shortname
-BRANDHOOK
-chmod +x config/hooks/live/990-nexora-branding.hook.binary
 
 # Keep the public-beta source/license information on the image.
 mkdir -p "$INC/usr/share/doc/nexora-os"
@@ -371,19 +228,5 @@ BUILT="$(find "$WORK" -maxdepth 1 -type f \( -name 'live-image-*.hybrid.iso' -o 
 [[ -n "$BUILT" && -s "$BUILT" ]] || { echo "live-build completed but no ISO was found" >&2; exit 4; }
 cp "$BUILT" "$OUT_DIR/$ISO_NAME"
 sha256sum "$OUT_DIR/$ISO_NAME" > "$OUT_DIR/$ISO_NAME.sha256"
-
-ISO_BYTES="$(stat -c '%s' "$OUT_DIR/$ISO_NAME")"
-ISO_MIB="$(( (ISO_BYTES + 1048575) / 1048576 ))"
-GITHUB_ASSET_LIMIT=2147483648
-
-printf '\nISO READY\n  %s\n  %s\n  Size: %s MiB\n' \
-  "$OUT_DIR/$ISO_NAME" "$OUT_DIR/$ISO_NAME.sha256" "$ISO_MIB"
-
-if (( ISO_BYTES >= GITHUB_ASSET_LIMIT )); then
-  printf '\nSIZE WARNING: this ISO is >= 2 GiB and cannot be uploaded as one GitHub Release asset.\n'
-  printf 'Run: %s/iso/analyze-size.sh\n' "$ROOT"
-else
-  printf '\nGitHub release-asset size gate: PASS (< 2 GiB).\n'
-fi
-
-printf '\nTest beta.5 in a NEW VMware VM before publishing it.\n'
+printf '\nISO READY\n  %s\n  %s\n' "$OUT_DIR/$ISO_NAME" "$OUT_DIR/$ISO_NAME.sha256"
+printf '\nTest it in a NEW VMware VM before publishing it.\n'

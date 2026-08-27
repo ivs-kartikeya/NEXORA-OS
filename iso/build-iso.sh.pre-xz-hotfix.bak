@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${NEXORA_ISO_OUT:-$ROOT/dist}"
 WORK="${NEXORA_ISO_WORK:-$ROOT/.iso-work}"
-ISO_NAME="NexoraOS-1.0.1-beta.5-amd64.iso"
+ISO_NAME="NexoraOS-1.0.1-beta.3-amd64.iso"
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}/nexora"
 VOICE="$DATA/voice"
 FAST_MODEL="$DATA/models/Qwen3-0.6B-Q4_0.gguf"
@@ -85,30 +85,24 @@ lb config noauto \
   --apt-recommends false \
   --cache false \
   --chroot-squashfs-compression-type xz \
+  --chroot-squashfs-compression-level 9 \
   --archive-areas "main contrib non-free-firmware" \
   --bootappend-live "boot=live components live-config.nox11autologin live-config.username=nexora live-config.hostname=nexora locales=en_US.UTF-8 keyboard-layouts=us quiet splash" \
   --bootappend-live-failsafe "boot=live components live-config.nox11autologin live-config.username=nexora live-config.hostname=nexora locales=en_US.UTF-8 keyboard-layouts=us nomodeset" \
   --iso-application "Nexora OS V1 Public Beta" \
   --iso-publisher "Nexora OS" \
-  --iso-volume "NEXORA_101B5"
+  --iso-volume "NEXORA_101B3"
 
 mkdir -p config/package-lists
 cat > config/package-lists/nexora.list.chroot <<'PKGS'
 live-boot
 live-config
-live-config-systemd
-user-setup
-locales
-keyboard-configuration
 systemd-sysv
 sudo
 dbus-user-session
 dbus-x11
 kwin-wayland
 xwayland
-qt6-wayland
-xterm
-xauth
 sddm
 qml6-module-qtquick
 qml6-module-qtquick-controls
@@ -167,7 +161,6 @@ mkdir -p \
   "$INC/usr/share/wayland-sessions" \
   "$INC/usr/share/sddm/themes/nexora" \
   "$INC/etc/sddm.conf.d" \
-  "$INC/etc/systemd/system/sddm.service.d" \
   "$INC/etc/live/config.conf.d"
 
 install -m0755 "$ROOT/build-out/nexora-shell" "$SKEL/.local/bin/nexora-shell"
@@ -210,7 +203,7 @@ TONY
 
 cat > "$SKEL/.local/share/nexora/release" <<'REL'
 NAME=Nexora OS
-VERSION=1.0.1-beta.5
+VERSION=1.0.1-beta.3
 CHANNEL=public-beta
 BASE=Debian-Linux
 DESKTOP=Nexora
@@ -231,12 +224,6 @@ RememberLastUser=false
 [Theme]
 Current=nexora
 SDDM
-
-cat > "$INC/etc/systemd/system/sddm.service.d/10-nexora-live-ordering.conf" <<'SDDMORDER'
-[Unit]
-Wants=live-config.service
-After=live-config.service
-SDDMORDER
 
 cat > "$INC/etc/live/config.conf.d/nexora.conf" <<'LIVECONFIG'
 LIVE_USERNAME="nexora"
@@ -261,45 +248,8 @@ rm -f /usr/share/wayland-sessions/plasma*.desktop /usr/share/xsessions/plasma*.d
 
 # Fail the ISO build rather than shipping another image whose custom session is
 # absent from the root filesystem.
-dpkg-query -W -f='${Status}\n' user-setup 2>/dev/null | grep -q 'install ok installed'
 test -x /usr/local/bin/start-nexora
 test -f /usr/share/wayland-sessions/nexora.desktop
-
-
-# Nexora release gate: fail closed on runtime dependency regressions.
-for pkg in user-setup live-config-systemd qt6-wayland xterm xauth; do
-  dpkg-query -W -f='${Status}\n' "$pkg" 2>/dev/null | grep -q 'install ok installed' || {
-    echo "Nexora release gate: required package missing: $pkg" >&2
-    exit 1
-  }
-done
-
-for bin in /etc/skel/.local/bin/nexora-shell /etc/skel/.local/bin/nexora-core /usr/bin/kwin_wayland; do
-  test -x "$bin" || { echo "Nexora release gate: executable missing: $bin" >&2; exit 1; }
-  missing="$(ldd "$bin" 2>/dev/null | grep -F 'not found' || true)"
-  if [ -n "$missing" ]; then
-    echo "Nexora release gate: unresolved libraries in $bin" >&2
-    echo "$missing" >&2
-    exit 1
-  fi
-done
-
-find /usr/lib /lib -type f -path '*/qt6/plugins/platforms/libqwayland*.so' -print -quit 2>/dev/null | grep -q . || {
-  echo 'Nexora release gate: Qt 6 Wayland platform plugin not found' >&2
-  exit 1
-}
-
-for module in QtQuick QtQuick/Controls QtQuick/Layouts QtQuick/Window QtQuick/Dialogs; do
-  find /usr/lib -type f -path "*/qt6/qml/$module/qmldir" -print -quit 2>/dev/null | grep -q . || {
-    echo "Nexora release gate: QML module missing: $module" >&2
-    exit 1
-  }
-done
-
-test -x /etc/skel/.local/libexec/nexora-shell-supervisor || {
-  echo 'Nexora release gate: shell supervisor missing' >&2
-  exit 1
-}
 
 # Do not preload Tony's LLM; the local model is demand-loaded.
 HOOK
@@ -353,7 +303,7 @@ for dir in binary/boot/grub binary/isolinux; do
  done
 
 mkdir -p binary/.disk
-printf '%s\n' 'Nexora OS 1.0.1 Public Beta beta.5' > binary/.disk/info
+printf '%s\n' 'Nexora OS 1.0.1 Public Beta beta.3' > binary/.disk/info
 printf '%s\n' 'Nexora OS' > binary/.disk/shortname
 BRANDHOOK
 chmod +x config/hooks/live/990-nexora-branding.hook.binary
@@ -386,4 +336,4 @@ else
   printf '\nGitHub release-asset size gate: PASS (< 2 GiB).\n'
 fi
 
-printf '\nTest beta.5 in a NEW VMware VM before publishing it.\n'
+printf '\nTest beta.3 in a NEW VMware VM before publishing it.\n'

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u
+set -uo pipefail
 
 SHELL_BIN="$HOME/.local/bin/nexora-shell"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nexora"
@@ -10,19 +10,72 @@ child=""
 stopping=0
 forward_stop() {
   stopping=1
-  if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then kill -TERM "$child" 2>/dev/null || true; fi
+  if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
+    kill -TERM "$child" 2>/dev/null || true
+  fi
 }
 trap forward_stop TERM INT HUP
 
+log() { printf '%s %s\n' "$(date --iso-8601=seconds)" "$*" >>"$LOG"; }
+
+runtime_preflight() {
+  local failed=0 missing=""
+
+  if [[ ! -x "$SHELL_BIN" ]]; then
+    log "PREFLIGHT FAIL shell missing: $SHELL_BIN"
+    return 1
+  fi
+
+  if command -v ldd >/dev/null 2>&1; then
+    missing="$(ldd "$SHELL_BIN" 2>/dev/null | grep -F 'not found' || true)"
+    if [[ -n "$missing" ]]; then
+      log "PREFLIGHT FAIL unresolved shared libraries:"
+      printf '%s\n' "$missing" >>"$LOG"
+      failed=1
+    fi
+  fi
+
+  # Nexora is a Qt 6 Wayland application. With --apt-recommends=false the
+  # platform plugin must be an explicit dependency of the image.
+  if ! find /usr/lib /lib -type f -path '*/qt6/plugins/platforms/libqwayland*.so' -print -quit 2>/dev/null | grep -q .; then
+    log "PREFLIGHT FAIL Qt 6 Wayland platform plugin is missing"
+    failed=1
+  fi
+
+  return "$failed"
+}
+
+show_recovery() {
+  local reason="$1"
+  log "RECOVERY $reason"
+
+  # Never throw the user back into a login loop for a shell crash. KWin stays
+  # alive and a tiny XTerm recovery window explains what happened. Closing it
+  # causes an automatic retry.
+  if command -v xterm >/dev/null 2>&1 && [[ -n "${DISPLAY:-}" ]]; then
+    /usr/bin/xterm -title "Nexora Recovery" -geometry 104x28 -e /bin/sh -lc \
+      "printf '\nNexora recovered from a desktop startup failure.\n\n'; \
+       printf 'The session is still running; no logout was forced.\n'; \
+       printf 'Recent diagnostics:\n\n'; \
+       tail -n 100 '$LOG' 2>/dev/null || true; \
+       printf '\nPress Enter to retry the Nexora desktop...'; read _" || true
+  else
+    # Extremely small fallback for a broken Xwayland/xterm path: keep the
+    # session alive and retry rather than returning to SDDM.
+    sleep 5
+  fi
+}
+
 crashes=0
 while true; do
-  if [[ ! -x "$SHELL_BIN" ]]; then
-    echo "$(date --iso-8601=seconds) FATAL shell missing: $SHELL_BIN" >>"$LOG"
-    exit 127
+  if ! runtime_preflight; then
+    show_recovery "runtime preflight failed"
+    crashes=0
+    continue
   fi
 
   started=$(date +%s)
-  echo "$(date --iso-8601=seconds) starting nexora-shell" >>"$LOG"
+  log "starting nexora-shell"
   "$SHELL_BIN" >>"$LOG" 2>&1 &
   child=$!
   wait "$child"
@@ -31,24 +84,24 @@ while true; do
   lived=$(( $(date +%s) - started ))
 
   if (( stopping )); then
-    echo "$(date --iso-8601=seconds) session supervisor stopping" >>"$LOG"
+    log "session supervisor stopping"
     exit 0
   fi
 
-  # rc=0 is the intentional Nexora logout path.
+  # rc=0 is the intentional Nexora logout path requested by the user.
   if (( rc == 0 )); then
-    echo "$(date --iso-8601=seconds) shell exited cleanly" >>"$LOG"
+    log "shell exited cleanly; ending session"
     exit 0
   fi
 
-  # A long healthy run resets the short crash-loop budget.
   if (( lived >= 60 )); then crashes=0; fi
   crashes=$((crashes + 1))
-  echo "$(date --iso-8601=seconds) shell crashed rc=$rc lived=${lived}s attempt=$crashes" >>"$LOG"
+  log "shell crashed rc=$rc lived=${lived}s attempt=$crashes"
 
   if (( crashes >= 3 )); then
-    echo "$(date --iso-8601=seconds) crash loop detected; returning to login manager" >>"$LOG"
-    exit "$rc"
+    show_recovery "desktop crash loop detected"
+    crashes=0
+  else
+    sleep 1
   fi
-  sleep 1
 done

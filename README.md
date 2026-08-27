@@ -55,7 +55,7 @@ V1 adds a reproducible Debian `live-build` pipeline:
 Output:
 
 ```text
-dist/NexoraOS-1.0.1-beta.1-amd64.iso
+dist/NexoraOS-1.0.1-beta.5-amd64.iso
 ```
 
 The V1 image is a **live public-testing ISO**, not the final production disk installer.

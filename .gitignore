@@ -36,3 +36,7 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# Local ISO build workspace
+.iso-work/
+.patch-backups/
