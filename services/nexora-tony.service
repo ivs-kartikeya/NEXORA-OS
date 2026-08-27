@@ -1,0 +1,18 @@
+[Unit]
+Description=Tony - Nexora local intelligence service
+After=nexora-core.service nexora-context.service network.target
+Wants=nexora-core.service nexora-context.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/nexora/services/tonyd.py
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-%h/.config/nexora/tony.env
+Nice=4
+CPUAccounting=true
+MemoryAccounting=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Nexora OS
+Comment=Nexora OS native desktop
+Exec=/usr/local/bin/start-nexora
+TryExec=/usr/local/bin/start-nexora
+Type=Application
+DesktopNames=Nexora
+X-GDM-SessionRegisters=true

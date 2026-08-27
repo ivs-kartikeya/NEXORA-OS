@@ -1,0 +1,11 @@
+[SddmGreeterTheme]
+Name=Nexora OS
+Description=Nexora OS V1 Public Beta login experience
+Author=Nexora
+License=GPL-3.0-or-later
+Type=sddm-theme
+Version=0.7
+MainScript=Main.qml
+ConfigFile=theme.conf
+Theme-Id=nexora
+Theme-API=2.0

@@ -1,0 +1,12 @@
+{
+  "KPlugin": {
+    "Name": "Nexora OS Window Bridge",
+    "Description": "Reports KWin-managed application windows to the Nexora OS taskbar",
+    "Id": "nexora-window-bridge",
+    "Version": "1.0.1-beta.1",
+    "License": "MIT"
+  },
+  "X-Plasma-API": "javascript",
+  "X-Plasma-MainScript": "code/main.js",
+  "KPackageStructure": "KWin/Script"
+}

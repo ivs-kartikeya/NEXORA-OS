@@ -1,0 +1,17 @@
+[Unit]
+Description=Nexora local context awareness daemon
+After=nexora-core.service
+Wants=nexora-core.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/nexora/services/nexora-contextd.py
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+Nice=5
+CPUAccounting=true
+MemoryAccounting=true
+
+[Install]
+WantedBy=default.target

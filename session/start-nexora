@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -u
+
+# Nexora OS 1.0.1-beta.1 native Wayland login entry point.
+# SDDM -> KWin -> Nexora shell. Plasma is not started.
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Nexora
+export XDG_SESSION_DESKTOP=nexora
+export DESKTOP_SESSION=nexora
+export KDE_APPLICATIONS_AS_SCOPE=1
+export QT_QPA_PLATFORM=wayland
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nexora"
+LOG="$STATE_DIR/native-session.log"
+SHELL_BIN="$HOME/.local/bin/nexora-shell"
+SUPERVISOR="$HOME/.local/libexec/nexora-shell-supervisor"
+mkdir -p "$STATE_DIR"
+
+{
+  echo "===== Nexora OS 1.0.1-beta.1 native session ====="
+  date --iso-8601=seconds
+  echo "uid=$(id -u) user=$(id -un)"
+  echo "HOME=$HOME"
+  echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-<unset>}"
+  echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-<unset>}"
+  echo "shell=$SHELL_BIN"
+  echo "supervisor=$SUPERVISOR"
+} >"$LOG" 2>&1
+
+if [[ ! -x "$SHELL_BIN" || ! -x "$SUPERVISOR" ]]; then
+  echo "FATAL: shell/supervisor missing" >>"$LOG"
+  exit 1
+fi
+
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]]; then
+  echo "No D-Bus address; re-entering under dbus-run-session" >>"$LOG"
+  exec dbus-run-session -- "$0"
+fi
+
+# Nexora owns its media session; Plasma is not present to do this for us.
+# Start audio first so Voice never races the PipeWire graph during login.
+systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber.service >>"$LOG" 2>&1 || true
+
+# The core layer survives shell restarts and owns deterministic system APIs.
+systemctl --user start nexora-core.service nexora-context.service >>"$LOG" 2>&1 || true
+# Tony text tools and Voice are independent: either one may fail without taking
+# the desktop down, but both are explicitly started for a normal Nexora login.
+systemctl --user start nexora-tony.service nexora-voice.service >>"$LOG" 2>&1 || true
+
+# KWin is our compositor implementation detail. The shell is the session child,
+# so a deliberate shell exit cleanly returns to SDDM.
+echo "Launching KWin -> Nexora shell supervisor" >>"$LOG"
+exec /usr/bin/kwin_wayland --xwayland --exit-with-session "$SUPERVISOR" >>"$LOG" 2>&1

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/nexora"
+LLAMA="${TONY_LLAMA_SERVER:-$ROOT/llama.cpp/build/bin/llama-server}"
+MODEL_FILE="${TONY_MODEL_FILE:-$ROOT/models/Qwen3-0.6B-Q4_0.gguf}"
+CTX="${TONY_CONTEXT:-3072}"
+THREADS="${TONY_THREADS:-4}"
+BATCH_THREADS="${TONY_BATCH_THREADS:-4}"
+PORT="${TONY_LLAMA_PORT:-8081}"
+
+if [[ ! -x "$LLAMA" ]]; then
+  echo "Tony: llama-server is missing at $LLAMA" >&2
+  echo "Run setup-tony.sh fast" >&2
+  exit 78
+fi
+if [[ ! -s "$MODEL_FILE" ]]; then
+  echo "Tony: local model is missing at $MODEL_FILE" >&2
+  echo "Run setup-tony.sh fast" >&2
+  exit 78
+fi
+
+echo "Tony: starting cached local model $MODEL_FILE on 127.0.0.1:$PORT"
+exec "$LLAMA" -m "$MODEL_FILE" --host 127.0.0.1 --port "$PORT" \
+  -c "$CTX" -t "$THREADS" -tb "$BATCH_THREADS" -np 1 \
+  --cache-type-k q8_0 --cache-type-v q8_0 --flash-attn on \
+  --no-ui

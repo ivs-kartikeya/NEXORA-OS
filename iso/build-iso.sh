@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUT_DIR="${NEXORA_ISO_OUT:-$ROOT/dist}"
+WORK="${NEXORA_ISO_WORK:-$ROOT/.iso-work}"
+ISO_NAME="NexoraOS-1.0.1-beta.1-amd64.iso"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/nexora"
+VOICE="$DATA/voice"
+FAST_MODEL="$DATA/models/Qwen3-0.6B-Q4_0.gguf"
+LLAMA_SRC="$DATA/llama.cpp"
+WHISPER_SRC="$VOICE/whisper.cpp"
+WHISPER_MODEL="$VOICE/models/ggml-base.en.bin"
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing $1" >&2; exit 2; }; }
+
+printf '\nNexora OS V1 Public Beta ISO builder\n'
+printf 'This creates a bootable LIVE testing ISO. It is not yet the production installer.\n\n'
+
+if [[ "$(dpkg --print-architecture 2>/dev/null || true)" != "amd64" ]]; then
+  echo "V1 public-beta ISO builder currently targets amd64 only." >&2
+  exit 2
+fi
+
+for cmd in cmake ninja git rsync curl; do need "$cmd"; done
+if ! command -v lb >/dev/null 2>&1; then
+  echo "Installing Debian live-build toolchain..."
+  sudo apt update
+  sudo apt install -y live-build debootstrap squashfs-tools xorriso rsync isolinux syslinux-common
+fi
+need lb
+
+[[ -s "$FAST_MODEL" ]] || {
+  echo "Tony fast model is not cached. Run: $ROOT/scripts/setup-tony.sh fast" >&2
+  exit 3
+}
+[[ -d "$LLAMA_SRC" ]] || {
+  echo "llama.cpp source is missing. Run: $ROOT/scripts/setup-tony.sh fast" >&2
+  exit 3
+}
+[[ -s "$WHISPER_MODEL" && -d "$WHISPER_SRC" ]] || {
+  echo "Whisper is not prepared. Run: $ROOT/scripts/setup-voice.sh" >&2
+  exit 3
+}
+
+# Build Nexora itself for the Debian/Trixie runtime.
+"$ROOT/scripts/build.sh"
+
+mkdir -p "$OUT_DIR"
+rm -rf "$WORK"
+mkdir -p "$WORK"
+
+# Public images must not contain binaries tuned specifically to the developer's
+# CPU. Rebuild the two inference executables with GGML_NATIVE=OFF.
+echo "Building portable Tony runtime..."
+cmake -S "$LLAMA_SRC" -B "$WORK/llama-portable" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DLLAMA_CURL=OFF >/dev/null
+cmake --build "$WORK/llama-portable" --target llama-server -j"$(nproc)"
+
+echo "Building portable Whisper runtime..."
+cmake -S "$WHISPER_SRC" -B "$WORK/whisper-portable" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF \
+  -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF >/dev/null
+cmake --build "$WORK/whisper-portable" --target whisper-cli -j"$(nproc)"
+
+cd "$WORK"
+lb config noauto \
+  --mode debian \
+  --distribution trixie \
+  --architectures amd64 \
+  --binary-images iso-hybrid \
+  --debian-installer none \
+  --archive-areas "main contrib non-free-firmware" \
+  --bootappend-live "boot=live components username=nexora hostname=nexora locales=en_US.UTF-8 keyboard-layouts=us quiet splash" \
+  --iso-application "Nexora OS V1 Public Beta" \
+  --iso-publisher "Nexora OS" \
+  --iso-volume "NEXORA_V1"
+
+mkdir -p config/package-lists
+cat > config/package-lists/nexora.list.chroot <<'PKGS'
+live-boot
+live-config
+systemd-sysv
+sudo
+dbus-user-session
+dbus-x11
+kwin-wayland
+xwayland
+sddm
+qml6-module-qtquick
+qml6-module-qtquick-controls
+qml6-module-qtquick-layouts
+qml6-module-qtquick-window
+qml6-module-qtquick-dialogs
+qml6-module-org-kde-layershell
+layer-shell-qt
+pipewire
+pipewire-pulse
+pipewire-bin
+wireplumber
+pulseaudio-utils
+alsa-utils
+network-manager
+polkitd
+pkexec
+polkit-kde-agent-1
+xdg-desktop-portal
+xdg-desktop-portal-kde
+python3
+sqlite3
+curl
+ca-certificates
+ffmpeg
+espeak-ng
+flatpak
+fonts-noto-core
+fonts-dejavu-core
+brightnessctl
+rfkill
+mesa-utils
+firefox-esr
+nano
+less
+procps
+htop
+PKGS
+
+INC="$WORK/config/includes.chroot"
+SKEL="$INC/etc/skel"
+mkdir -p \
+  "$SKEL/.local/bin" \
+  "$SKEL/.local/libexec" \
+  "$SKEL/.local/share/nexora/services" \
+  "$SKEL/.local/share/nexora/bin" \
+  "$SKEL/.local/share/nexora/models" \
+  "$SKEL/.local/share/nexora/llama.cpp/build/bin" \
+  "$SKEL/.local/share/nexora/voice/whisper.cpp/build/bin" \
+  "$SKEL/.local/share/nexora/voice/models" \
+  "$SKEL/.local/share/nexora/voice/piper-voices" \
+  "$SKEL/.local/share/kwin/scripts" \
+  "$SKEL/.config/systemd/user/default.target.wants" \
+  "$SKEL/.config/nexora" \
+  "$INC/usr/local/bin" \
+  "$INC/usr/share/wayland-sessions" \
+  "$INC/usr/share/sddm/themes/nexora" \
+  "$INC/etc/sddm.conf.d"
+
+install -m0755 "$ROOT/build-out/nexora-shell" "$SKEL/.local/bin/nexora-shell"
+install -m0755 "$ROOT/build-out/nexora-core" "$SKEL/.local/bin/nexora-core"
+install -m0755 "$ROOT/session/nexora-shell-supervisor" "$SKEL/.local/libexec/nexora-shell-supervisor"
+install -m0755 "$ROOT/session/start-nexora" "$INC/usr/local/bin/start-nexora"
+install -m0644 "$ROOT/session/nexora.desktop" "$INC/usr/share/wayland-sessions/nexora.desktop"
+cp -a "$ROOT/identity/sddm-nexora/." "$INC/usr/share/sddm/themes/nexora/"
+cp -a "$ROOT/kwin/nexora-window-bridge" "$SKEL/.local/share/kwin/scripts/"
+
+for f in nexora-contextd.py tonyd.py nexora-voiced.py; do
+  install -m0755 "$ROOT/services/$f" "$SKEL/.local/share/nexora/services/$f"
+done
+install -m0755 "$ROOT/runtime/run-tony-llm" "$SKEL/.local/share/nexora/bin/run-tony-llm"
+for unit in nexora-core.service nexora-context.service nexora-tony.service nexora-llm.service nexora-voice.service; do
+  install -m0644 "$ROOT/services/$unit" "$SKEL/.config/systemd/user/$unit"
+done
+ln -s ../nexora-core.service "$SKEL/.config/systemd/user/default.target.wants/nexora-core.service"
+ln -s ../nexora-context.service "$SKEL/.config/systemd/user/default.target.wants/nexora-context.service"
+ln -s ../nexora-tony.service "$SKEL/.config/systemd/user/default.target.wants/nexora-tony.service"
+ln -s ../nexora-voice.service "$SKEL/.config/systemd/user/default.target.wants/nexora-voice.service"
+
+install -m0755 "$WORK/llama-portable/bin/llama-server" "$SKEL/.local/share/nexora/llama.cpp/build/bin/llama-server"
+install -m0644 "$FAST_MODEL" "$SKEL/.local/share/nexora/models/Qwen3-0.6B-Q4_0.gguf"
+install -m0755 "$WORK/whisper-portable/bin/whisper-cli" "$SKEL/.local/share/nexora/voice/whisper.cpp/build/bin/whisper-cli"
+install -m0644 "$WHISPER_MODEL" "$SKEL/.local/share/nexora/voice/models/ggml-base.en.bin"
+
+cat > "$SKEL/.config/nexora/tony.env" <<'TONY'
+TONY_MODEL_FILE=/home/nexora/.local/share/nexora/models/Qwen3-0.6B-Q4_0.gguf
+TONY_MODEL_PROFILE=fast
+TONY_CONTEXT=3072
+TONY_THREADS=4
+TONY_BATCH_THREADS=4
+TONY_LLAMA_PORT=8081
+TONY_MAX_TOKENS=320
+TONY_MODEL_POLICY=balanced
+TONY_BALANCED_IDLE_SECONDS=480
+TONY_ECO_IDLE_SECONDS=75
+TONY
+
+cat > "$SKEL/.local/share/nexora/release" <<'REL'
+NAME=Nexora OS
+VERSION=1.0.1-beta.1
+CHANNEL=public-beta
+BASE=Debian-Linux
+DESKTOP=Nexora
+CORE_API=org.nexora.Core
+AI=Tony
+REL
+
+cat > "$INC/etc/sddm.conf.d/90-nexora-live.conf" <<'SDDM'
+[Autologin]
+User=nexora
+Session=nexora.desktop
+Relogin=false
+
+[Theme]
+Current=nexora
+SDDM
+
+mkdir -p config/hooks/live
+cat > config/hooks/live/050-nexora.hook.chroot <<'HOOK'
+#!/bin/sh
+set -e
+chmod 0755 /usr/local/bin/start-nexora
+# Ensure NetworkManager owns networking in the live environment.
+systemctl enable NetworkManager.service >/dev/null 2>&1 || true
+systemctl enable sddm.service >/dev/null 2>&1 || true
+# Do not preload Tony's LLM; the local model is demand-loaded.
+HOOK
+chmod +x config/hooks/live/050-nexora.hook.chroot
+
+# Keep the public-beta source/license information on the image.
+mkdir -p "$INC/usr/share/doc/nexora-os"
+cp "$ROOT/README.md" "$INC/usr/share/doc/nexora-os/README.md"
+cp "$ROOT/VERSION" "$INC/usr/share/doc/nexora-os/VERSION"
+[[ -f "$ROOT/THIRD_PARTY_NOTICES.md" ]] && cp "$ROOT/THIRD_PARTY_NOTICES.md" "$INC/usr/share/doc/nexora-os/THIRD_PARTY_NOTICES.md"
+
+printf '\nBuilding Debian live image. This is CPU/disk intensive and can take a while...\n'
+sudo lb build
+
+BUILT="$(find "$WORK" -maxdepth 1 -type f \( -name 'live-image-*.hybrid.iso' -o -name 'live-image-*.iso' \) | head -n1)"
+[[ -n "$BUILT" && -s "$BUILT" ]] || { echo "live-build completed but no ISO was found" >&2; exit 4; }
+cp "$BUILT" "$OUT_DIR/$ISO_NAME"
+sha256sum "$OUT_DIR/$ISO_NAME" > "$OUT_DIR/$ISO_NAME.sha256"
+printf '\nISO READY\n  %s\n  %s\n' "$OUT_DIR/$ISO_NAME" "$OUT_DIR/$ISO_NAME.sha256"
+printf '\nTest it in a NEW VMware VM before publishing it.\n'

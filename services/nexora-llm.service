@@ -1,0 +1,18 @@
+[Unit]
+Description=Tony local language model (llama.cpp)
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/nexora/bin/run-tony-llm
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=6
+EnvironmentFile=-%h/.config/nexora/tony.env
+Nice=7
+CPUAccounting=true
+MemoryAccounting=true
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,38 @@
+# Build output
+build/
+build-out/
+dist/
+iso/work/
+iso/cache/
+iso/chroot/
+
+# ISO / release binaries
+*.iso
+*.iso.sha256
+
+# AI models
+*.gguf
+*.bin
+*.onnx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime/cache/state
+.cache/
+runtime/cache/
+runtime/logs/
+*.log
+
+# IDE / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*~
