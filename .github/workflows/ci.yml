@@ -10,16 +10,22 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    container: debian:trixie-slim
     timeout-minutes: 20
     steps:
+      - name: Bootstrap checkout dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
       - uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Install Nexora build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          apt-get update
+          apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build python3 \
-            qt6-base-dev qt6-declarative-dev
+            qt6-base-dev qt6-declarative-dev libxkbcommon-dev
 
       - name: Synchronize release metadata
         run: bash ./scripts/sync-version.sh --apply
