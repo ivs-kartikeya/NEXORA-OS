@@ -42,4 +42,6 @@ jobs:
           test -x build-out/nexora-core
 
       - name: Reject malformed patches
-        run: git diff --check
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" diff --check
