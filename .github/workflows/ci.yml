@@ -1,12 +1,47 @@
 name: Nexora CI
+
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  static-audit:
+  validate:
     runs-on: ubuntu-latest
+    container: debian:trixie-slim
+    timeout-minutes: 20
     steps:
+      - name: Bootstrap checkout dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
+
       - uses: actions/checkout@v4
+
+      - name: Install Nexora build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 \
+            qt6-base-dev qt6-declarative-dev libxkbcommon-dev
+
+      - name: Synchronize release metadata
+        run: bash ./scripts/sync-version.sh --apply
+
       - name: Static audit
         run: ./scripts/static-audit.sh
+
+      - name: Compile Nexora shell and core
+        run: ./scripts/build.sh
+
+      - name: Verify expected binaries
+        run: |
+          test -x build-out/nexora-shell
+          test -x build-out/nexora-core
+
+      - name: Reject malformed patches
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" diff --check
