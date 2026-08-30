@@ -1,12 +1,33 @@
 name: Nexora CI
+
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  static-audit:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build python3 \
+            qt6-base-dev qt6-declarative-dev
+
       - name: Static audit
         run: ./scripts/static-audit.sh
+
+      - name: Compile Nexora shell and core
+        run: ./scripts/build.sh
+
+      - name: Verify expected binaries
+        run: |
+          test -x build-out/nexora-shell
+          test -x build-out/nexora-core
