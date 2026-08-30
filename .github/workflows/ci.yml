@@ -21,6 +21,9 @@ jobs:
             build-essential cmake ninja-build python3 \
             qt6-base-dev qt6-declarative-dev
 
+      - name: Synchronize release metadata
+        run: ./scripts/sync-version.sh --apply
+
       - name: Static audit
         run: ./scripts/static-audit.sh
 
@@ -31,3 +34,6 @@ jobs:
         run: |
           test -x build-out/nexora-shell
           test -x build-out/nexora-core
+
+      - name: Reject malformed patches
+        run: git diff --check
