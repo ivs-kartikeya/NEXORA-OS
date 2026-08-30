@@ -82,8 +82,6 @@ from pathlib import Path
 
 version = os.environ['NEXORA_VERSION']
 
-# Files that intentionally expose the public Nexora release version must agree
-# with VERSION. This is dynamic so a version bump cannot silently make CI stale.
 checks = {
     'src/systembackend.h': version,
     'src/coredaemon.cpp': version,
@@ -112,9 +110,10 @@ for fn in ['src/main.cpp','src/systembackend.cpp','src/systembackend.h','src/cor
     if text.count('{') != text.count('}'):
         raise SystemExit(f'unbalanced C++ braces: {fn}')
 
-# Reject stale hard-coded beta version strings in release-sensitive files.
+# Reject any stale beta release marker, independent of the current release
+# family. This keeps the audit valid when Nexora moves past 1.0.1.
 release_files = list(checks) + ['kwin/nexora-window-bridge/metadata.json']
-version_pattern = re.compile(r'1\.0\.1-beta\.\d+')
+version_pattern = re.compile(r'\b\d+\.\d+\.\d+-beta\.\d+\b')
 for fn in release_files:
     for found in version_pattern.findall(Path(fn).read_text()):
         if found != version:
