@@ -31,10 +31,10 @@ rules = {
          f'{{QStringLiteral("version"), QStringLiteral("{version}")}}'),
     ],
     "services/tonyd.py": [
-        (r'"version"\s*:\s*"[^"]+"', f'"version": "{version}"'),
+        (r'\b\d+\.\d+\.\d+-beta\.\d+\b', version),
     ],
     "services/nexora-voiced.py": [
-        (r'"version"\s*:\s*"[^"]+"', f'"version": "{version}"'),
+        (r'\b\d+\.\d+\.\d+-beta\.\d+\b', version),
     ],
     "kwin/nexora-window-bridge/metadata.json": [
         (r'"Version"\s*:\s*"[^"]+"', f'"Version": "{version}"'),
