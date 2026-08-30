@@ -43,6 +43,15 @@ rules = {
         (r'project\(NexoraOS VERSION [0-9.]+ LANGUAGES CXX\)',
          f'project(NexoraOS VERSION {base} LANGUAGES CXX)'),
     ],
+    "session/start-nexora": [
+        (r'(# Nexora OS native Wayland session entry point\.\n)(?:NEXORA_RELEASE="[^"]+"\n)?',
+         rf'\1NEXORA_RELEASE="{version}"\n'),
+    ],
+    "iso/build-iso.sh": [
+        (r'ISO_NAME="NexoraOS-[0-9A-Za-z._-]+-amd64\.iso"',
+         f'ISO_NAME="NexoraOS-{version}-amd64.iso"'),
+        (r'(?m)^VERSION=[0-9A-Za-z._-]+$', f'VERSION={version}'),
+    ],
 }
 
 changed = []
