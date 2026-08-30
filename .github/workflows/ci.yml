@@ -22,7 +22,7 @@ jobs:
             qt6-base-dev qt6-declarative-dev
 
       - name: Synchronize release metadata
-        run: ./scripts/sync-version.sh --apply
+        run: bash ./scripts/sync-version.sh --apply
 
       - name: Static audit
         run: ./scripts/static-audit.sh
