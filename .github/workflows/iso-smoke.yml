@@ -86,8 +86,8 @@ jobs:
               test -s "$iso"
               test -s "$sum"
 
-              expected="$(awk "{print \\$1}" "$sum")"
-              actual="$(sha256sum "$iso" | awk "{print \\$1}")"
+              expected="$(cut -d " " -f1 "$sum")"
+              actual="$(sha256sum "$iso" | cut -d " " -f1)"
               test "$expected" = "$actual"
 
               bytes="$(stat -c "%s" "$iso")"
