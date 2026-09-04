@@ -1,0 +1,123 @@
+name: Nexora ISO Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/iso-smoke.yml'
+      - 'CMakeLists.txt'
+      - 'VERSION'
+      - 'src/**'
+      - 'qml/**'
+      - 'services/**'
+      - 'session/**'
+      - 'runtime/**'
+      - 'identity/**'
+      - 'kwin/**'
+      - 'iso/**'
+      - 'scripts/**'
+  pull_request:
+    paths:
+      - '.github/workflows/iso-smoke.yml'
+      - 'CMakeLists.txt'
+      - 'VERSION'
+      - 'src/**'
+      - 'qml/**'
+      - 'services/**'
+      - 'session/**'
+      - 'runtime/**'
+      - 'identity/**'
+      - 'kwin/**'
+      - 'iso/**'
+      - 'scripts/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nexora-iso-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-iso-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup || true
+          docker system prune -af || true
+          df -h /
+
+      - name: Cache pinned local-AI assets
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/share/nexora
+          key: nexora-ai-v1-llama-ca3d5a3-whisper-9781133-qwen-da2572-whispermodel-a03779
+
+      - name: Build Debian Trixie live ISO in isolated container
+        run: |
+          mkdir -p .ci-cache/share/nexora
+          docker run --privileged --rm \
+            -e DEBIAN_FRONTEND=noninteractive \
+            -e XDG_DATA_HOME=/work/.ci-cache/share \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work \
+            debian:trixie \
+            bash -euxo pipefail -c '
+              apt-get update
+              apt-get install -y --no-install-recommends \
+                sudo git ca-certificates curl rsync \
+                build-essential cmake ninja-build pkg-config \
+                qt6-base-dev qt6-declarative-dev libxkbcommon-dev \
+                live-build debootstrap squashfs-tools xorriso \
+                isolinux syslinux-common
+
+              bash scripts/prepare-ci-assets.sh
+              ./iso/build-iso.sh
+
+              version="$(tr -d "[:space:]" < VERSION)"
+              iso="dist/NexoraOS-${version}-amd64.iso"
+              sum="${iso}.sha256"
+              test -s "$iso"
+              test -s "$sum"
+
+              expected="$(cut -d " " -f1 "$sum")"
+              actual="$(sha256sum "$iso" | cut -d " " -f1)"
+              test "$expected" = "$actual"
+
+              bytes="$(stat -c "%s" "$iso")"
+              test "$bytes" -lt 2147483648
+
+              # Make the distributed checksum portable instead of embedding the
+              # CI container path in the .sha256 file.
+              (cd dist && sha256sum "$(basename "$iso")" > "$(basename "$sum")")
+              echo "ISO integrity and release-size gates passed."
+            '
+
+      - name: Remove live-build workspace before emulation
+        run: |
+          sudo rm -rf .iso-work
+          df -h /
+
+      - name: Install QEMU smoke-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 libarchive-tools
+
+      - name: Boot ISO and require a stable Nexora desktop session
+        env:
+          NEXORA_SMOKE_TIMEOUT: '480'
+          NEXORA_SMOKE_RAM_MB: '3072'
+          NEXORA_SMOKE_CPUS: '2'
+        run: bash scripts/iso-smoke-test.sh
+
+      - name: Final checksum verification
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          cd dist
+          sha256sum -c "NexoraOS-${version}-amd64.iso.sha256"

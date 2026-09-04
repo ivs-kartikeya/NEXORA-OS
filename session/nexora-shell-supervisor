@@ -6,10 +6,31 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/nexora"
 LOG="$STATE_DIR/shell-supervisor.log"
 mkdir -p "$STATE_DIR"
 
+# Automated ISO smoke tests boot with nexora.ci-smoke=1 and place the live user
+# in the dialout group. Normal users never see this path. The marker lets CI
+# prove that SDDM -> KWin -> supervisor -> Nexora Shell remained alive instead
+# of merely proving that the kernel booted.
+ci_smoke=0
+if grep -Fqw 'nexora.ci-smoke=1' /proc/cmdline 2>/dev/null; then
+  ci_smoke=1
+fi
+ci_mark() {
+  (( ci_smoke )) || return 0
+  local msg="NEXORA_SMOKE:$*"
+  printf '%s\n' "$msg" >>"$LOG"
+  if [[ -w /dev/ttyS0 ]]; then
+    printf '%s\r\n' "$msg" >/dev/ttyS0 2>/dev/null || true
+  fi
+}
+
 child=""
+smoke_probe=""
 stopping=0
 forward_stop() {
   stopping=1
+  if [[ -n "$smoke_probe" ]] && kill -0 "$smoke_probe" 2>/dev/null; then
+    kill -TERM "$smoke_probe" 2>/dev/null || true
+  fi
   if [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null; then
     kill -TERM "$child" 2>/dev/null || true
   fi
@@ -69,6 +90,7 @@ show_recovery() {
 crashes=0
 while true; do
   if ! runtime_preflight; then
+    ci_mark "PREFLIGHT_FAIL"
     show_recovery "runtime preflight failed"
     crashes=0
     continue
@@ -78,8 +100,28 @@ while true; do
   log "starting nexora-shell"
   "$SHELL_BIN" >>"$LOG" 2>&1 &
   child=$!
+
+  # A shell that survives the initial 20-second startup window is considered
+  # ready for the automated live-image smoke test. The host then terminates the
+  # disposable QEMU guest; this has no effect during normal boots.
+  smoke_probe=""
+  if (( ci_smoke )); then
+    (
+      sleep 20
+      if kill -0 "$child" 2>/dev/null; then
+        ci_mark "SESSION_READY"
+      fi
+    ) &
+    smoke_probe=$!
+  fi
+
   wait "$child"
   rc=$?
+  if [[ -n "$smoke_probe" ]] && kill -0 "$smoke_probe" 2>/dev/null; then
+    kill -TERM "$smoke_probe" 2>/dev/null || true
+    wait "$smoke_probe" 2>/dev/null || true
+  fi
+  smoke_probe=""
   child=""
   lived=$(( $(date +%s) - started ))
 
@@ -88,12 +130,19 @@ while true; do
     exit 0
   fi
 
-  # rc=0 is the intentional Nexora logout path requested by the user.
+  # rc=0 is the intentional Nexora logout path requested by the user. During
+  # CI it is an early-session failure because nobody requested a logout.
   if (( rc == 0 )); then
+    if (( ci_smoke )); then
+      ci_mark "SESSION_EXITED_EARLY lived=${lived}s"
+      sleep 5
+      continue
+    fi
     log "shell exited cleanly; ending session"
     exit 0
   fi
 
+  ci_mark "SESSION_CRASH rc=$rc lived=${lived}s"
   if (( lived >= 60 )); then crashes=0; fi
   crashes=$((crashes + 1))
   log "shell crashed rc=$rc lived=${lived}s attempt=$crashes"
