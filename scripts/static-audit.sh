@@ -110,8 +110,6 @@ for fn in ['src/main.cpp','src/systembackend.cpp','src/systembackend.h','src/cor
     if text.count('{') != text.count('}'):
         raise SystemExit(f'unbalanced C++ braces: {fn}')
 
-# Reject any stale beta release marker, independent of the current release
-# family. This keeps the audit valid when Nexora moves past 1.0.1.
 release_files = list(checks) + ['kwin/nexora-window-bridge/metadata.json']
 version_pattern = re.compile(r'\b\d+\.\d+\.\d+-beta\.\d+\b')
 for fn in release_files:
@@ -119,7 +117,18 @@ for fn in release_files:
         if found != version:
             raise SystemExit(f'stale release version in {fn}: {found} (current {version})')
 
-print(f'  [OK] release coherence for {version} + C++ structural smoke test')
+publish = Path('scripts/publish-github-release.sh').read_text()
+if '--clobber' in publish:
+    raise SystemExit('release publisher may overwrite an existing GitHub release asset')
+if re.search(r'NexoraOS-\d+\.\d+\.\d+-beta\.\d+-amd64\.iso', publish):
+    raise SystemExit('release publisher contains a hard-coded beta ISO filename')
+if re.search(r'NEXORA_TAG:-v\d+\.\d+\.\d+-beta\.\d+', publish):
+    raise SystemExit('release publisher contains a hard-coded beta tag')
+for required in ['VERSION=', 'EXPECTED_TAG="v${VERSION}"', 'sha256sum -c', 'Refusing to modify existing release']:
+    if required not in publish:
+        raise SystemExit('release publisher missing safety guard: ' + required)
+
+print(f'  [OK] release coherence for {version} + non-destructive publisher guards + C++ structural smoke test')
 PY
 
 if grep -RIn -E 'engineeringos|EngineeringOSProjects|EngineeringOSNotes' src qml services runtime session kwin identity --exclude-dir=history >/tmp/nexora-stale-runtime 2>/dev/null; then
