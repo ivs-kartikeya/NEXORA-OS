@@ -64,8 +64,9 @@ public final class DragonEggBlockEntity extends BlockEntity {
         hatchTarget=Math.max(1200,in.getIntOr("HatchTarget",24000));
         String bonded=in.getStringOr("BondedPlayer","");
         if(!bonded.isBlank()) try{bondedPlayer=UUID.fromString(bonded);}catch(IllegalArgumentException ignored){bondedPlayer=null;}
-        if(in.getDouble("AdultScale").isPresent()) genome=new DragonGenome(
-                in.getDoubleOr("AdultScale",1.0),
+        double adultScale=in.getDoubleOr("AdultScale",Double.NaN);
+        if(!Double.isNaN(adultScale)) genome=new DragonGenome(
+                adultScale,
                 in.getDoubleOr("WingBias",1.0),
                 in.getDoubleOr("BulkBias",1.0),
                 in.getDoubleOr("Temperament",0.5),
