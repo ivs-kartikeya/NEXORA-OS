@@ -25,9 +25,8 @@ jobs:
           gradle-version: '9.5.1'
       - name: Reconstruct source
         run: |
-          wc -c mythicfrontiers-ci/chunks/chunk_*.b64
-          sha256sum mythicfrontiers-ci/chunks/chunk_*.b64
-          cat mythicfrontiers-ci/chunks/chunk_*.b64 > /tmp/mf.b64
+          sha256sum mythicfrontiers-ci/chunks/chunk_0{0,1,2,3,4,5,6,7}.b64 mythicfrontiers-ci/chunks/chunk_08a.b64 mythicfrontiers-ci/chunks/chunk_08b.b64
+          cat mythicfrontiers-ci/chunks/chunk_0{0,1,2,3,4,5,6,7}.b64 mythicfrontiers-ci/chunks/chunk_08a.b64 mythicfrontiers-ci/chunks/chunk_08b.b64 > /tmp/mf.b64
           wc -c /tmp/mf.b64
           base64 -d /tmp/mf.b64 > /tmp/mf.zip
           unzip -t /tmp/mf.zip
