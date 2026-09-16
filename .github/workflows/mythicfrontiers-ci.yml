@@ -1,0 +1,48 @@
+name: Mythic Frontiers Java 25 build
+
+on:
+  push:
+    branches: [ci-mythicfrontiers-v1]
+    paths:
+      - 'mythicfrontiers-ci/**'
+      - '.github/workflows/mythicfrontiers-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.1'
+      - name: Reconstruct source
+        run: |
+          cat mythicfrontiers-ci/chunks/chunk_*.b64 > /tmp/mf.b64
+          base64 -d /tmp/mf.b64 > /tmp/mf.zip
+          mkdir -p /tmp/mf-src
+          unzip -q /tmp/mf.zip -d /tmp/mf-src
+          if [ -d mythicfrontiers-ci/overrides ]; then
+            cp -a mythicfrontiers-ci/overrides/. /tmp/mf-src/mf-ci-min/
+          fi
+      - name: Verify toolchain
+        run: |
+          java -version
+          gradle --version
+      - name: Build
+        working-directory: /tmp/mf-src/mf-ci-min
+        run: gradle --no-daemon clean build --stacktrace
+      - name: Upload jars
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mythicfrontiers-ci-build
+          path: /tmp/mf-src/mf-ci-min/build/libs/*.jar
+          if-no-files-found: ignore
